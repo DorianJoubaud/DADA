@@ -7,12 +7,15 @@ from sklearn.model_selection import train_test_split
 import wandb
 
 import torch
-from model import CNN1D, CustomCNN
+from model import CNN1D
 from loader import Loader
 from trainer import Trainer
 from tester import Tester
+from model import Discriminator, Regressor
 import math
+
 from torch.optim import lr_scheduler
+import itertools
 
 import argparse
 
@@ -59,7 +62,7 @@ if __name__ == '__main__':
         wandb.login(key=key)
     
     seq_len = 30  
-    batch_size = 32  
+    batch_size = 32
     x0 = 0.001  
     early_rul = 130  
     
@@ -103,26 +106,29 @@ if __name__ == '__main__':
     
     
     input_data = torch.randn(batch_size, seq_len, dim)  # Example input data
-    # model = CNN1D(seq_len, dim)  # Example model
-    model = CustomCNN(input_channels=dim, window_length=seq_len)
-    optimizer = torch.optim.Adam(model.parameters(), lr=x0)
+    model = CNN1D(input_channels=dim)
+    discriminator = Discriminator()
+    regressor = Regressor()
+    # optimize model and regressor
+    optimizer = torch.optim.Adam(itertools.chain(model.parameters(), regressor.parameters()), lr=x0, weight_decay=1e-4)
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 / (1.0 + 10 * epoch) ** 0.75)
     
     
   
-    model = CustomCNN(input_channels=dim, window_length=seq_len)
     
     if args.train:
         trainer = Trainer(model=model,
+                        regressor=regressor,
+                        discriminator=discriminator,
                         model_optimizer=optimizer,
                         model_scheduler=lr_scheduler,
                         print_every=500,
-                        epochs=30,
+                        epochs=args.epochs,
                         device='mps',
                         prefix=f'{args.source}_{args.target}',
                         early_rul=early_rul,
                         wandb=args.wandb)
-        best_score, best_RMSE = trainer.train(source_train, source_test, target_test)
+        best_score, best_RMSE = trainer.train(source_train, source_test, target_train, target_test)
         print('==== TRAINING FINISHED ====')
     
     #load model
@@ -130,13 +136,18 @@ if __name__ == '__main__':
     checkpoint = torch.load(f'checkpoints/{args.source}_{args.target}_best_score.pth')
 
     # Extract the model's state dict
-    model_state_dict = checkpoint['state_dict']
+   
+    
 
     # Load the model state dict
-    model.load_state_dict(model_state_dict)
+    model.load_state_dict(checkpoint['fe_state_dict'])
+    regressor.load_state_dict(checkpoint['reg_state_dict'])
+    # discriminator.load_state_dict(checkpoint['dis_state_dict'])
     model.eval()
+    regressor.eval
+    # discriminator.eval()
     model.to('mps')
-    tester = Tester(model=model,early_rul=early_rul, device='mps')
+    tester = Tester(model=model, regressor=regressor,early_rul=early_rul, device='mps')
     source_score, source_RMSE = tester.test(source_test)
     target_score, target_RMSE = tester.test(target_test)
     source_res = [source_score, source_RMSE.cpu().numpy()]
