@@ -50,6 +50,7 @@ if __name__ == '__main__':
     parser.add_argument('--target', type=str, default='FD002', help='target domain')
     parser.add_argument('--epochs', type=int, default=30, help='number of epochs')
     parser.add_argument('--train', type=int, default=1, help='train or not')
+    parser.add_argument('--gpu', type=str, default='mps', help='gpu id')
     #print parser.parse_args()
     print(parser.parse_args())
     
@@ -60,6 +61,12 @@ if __name__ == '__main__':
         # add key
         key = np.loadtxt('key.txt', dtype=str)
         wandb.login(key=key)
+    
+    # test if gpu is available
+    if args.gpu == 'mps':
+        device = 'mps'
+    else:
+        device = 'cuda:' + args.gpu if torch.cuda.is_available() else 'cpu'
     
     seq_len = 30  
     batch_size = 32
@@ -124,7 +131,7 @@ if __name__ == '__main__':
                         model_scheduler=lr_scheduler,
                         print_every=500,
                         epochs=args.epochs,
-                        device='mps',
+                        device=args.gpu,
                         prefix=f'{args.source}_{args.target}',
                         early_rul=early_rul,
                         wandb=args.wandb)
@@ -146,8 +153,8 @@ if __name__ == '__main__':
     model.eval()
     regressor.eval
     # discriminator.eval()
-    model.to('mps')
-    tester = Tester(model=model, regressor=regressor,early_rul=early_rul, device='mps')
+    model.to(device)
+    tester = Tester(model=model, regressor=regressor,early_rul=early_rul, device=device)
     source_score, source_RMSE = tester.test(source_test)
     target_score, target_RMSE = tester.test(target_test)
     source_res = [source_score, source_RMSE.cpu().numpy()]
